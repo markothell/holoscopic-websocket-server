@@ -131,7 +131,7 @@ let apiRoutesLoaded = false;
 function loadAPIRoutes() {
   if (isMongoConnected && Activity && !apiRoutesLoaded) {
     try {
-      const activityRoutes = require('./routes/activities')(io);
+      const activityRoutes = require('./server/routes/activities')(io);
       app.use('/api/activities', activityRoutes);
       apiRoutesLoaded = true;
       console.log('✅ API routes loaded successfully');
@@ -159,7 +159,7 @@ if (process.env.MONGODB_URI) {
     isMongoConnected = true;
     
     try {
-      Activity = require('./models/Activity');
+      Activity = require('./server/models/Activity');
       console.log('✅ MongoDB models loaded');
       
       loadAPIRoutes();
