@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: we-all-explain-socket-server
+    env: node
+    buildCommand: npm install
+    startCommand: node websocket-server.js
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MAX_CONNECTIONS
+        value: 25
