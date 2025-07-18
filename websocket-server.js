@@ -145,7 +145,14 @@ function loadAPIRoutes() {
 console.log("MongoDB URI:", process.env.MONGODB_URI ? "Set" : "Not set");
 
 if (process.env.MONGODB_URI) {
-  mongoose.connect(process.env.MONGODB_URI, {
+  // Append weallexplain-db database name to the URI
+  const mongoUri = process.env.MONGODB_URI.includes('?') 
+    ? process.env.MONGODB_URI.replace('?', '/weallexplain-db?')
+    : process.env.MONGODB_URI + '/weallexplain-db';
+  
+  console.log("🗃️  Using database: weallexplain-db");
+  
+  mongoose.connect(mongoUri, {
     maxPoolSize: process.env.NODE_ENV === 'production' ? 20 : 3,
     minPoolSize: process.env.NODE_ENV === 'production' ? 5 : 1,
     maxIdleTimeMS: process.env.NODE_ENV === 'production' ? 30000 : 15000,
