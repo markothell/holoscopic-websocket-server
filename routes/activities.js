@@ -99,18 +99,11 @@ router.get('/by-url/:urlName', async (req, res) => {
       });
     }
     
-    // Transform _id to id for frontend compatibility and ensure quadrants exist
+    // Transform _id to id for frontend compatibility
     const activityObj = activity.toObject();
     const transformedActivity = {
       ...activityObj,
-      id: activity._id.toString(),
-      // Ensure quadrants field exists with defaults if missing
-      quadrants: activityObj.quadrants || {
-        q1: 'Q1 (++)',
-        q2: 'Q2 (-+)',
-        q3: 'Q3 (--)',
-        q4: 'Q4 (+-)'
-      }
+      id: activity._id.toString()
     };
     
     res.json({
@@ -138,18 +131,11 @@ router.get('/:id', async (req, res) => {
       });
     }
     
-    // Transform _id to id for frontend compatibility and ensure quadrants exist
+    // Transform _id to id for frontend compatibility
     const activityObj = activity.toObject();
     const transformedActivity = {
       ...activityObj,
-      id: activity._id.toString(),
-      // Ensure quadrants field exists with defaults if missing
-      quadrants: activityObj.quadrants || {
-        q1: 'Q1 (++)',
-        q2: 'Q2 (-+)',
-        q3: 'Q3 (--)',
-        q4: 'Q4 (+-)'
-      }
+      id: activity._id.toString()
     };
     
     res.json({
@@ -173,10 +159,11 @@ router.post('/', async (req, res) => {
       urlName,
       mapQuestion,
       mapQuestion2,
+      objectNameQuestion,
       xAxis,
       yAxis,
       commentQuestion,
-      quadrants
+      starterData
     } = req.body;
     
     // Validate required fields
@@ -184,6 +171,13 @@ router.post('/', async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'Title, URL name, map question, and comment question are required'
+      });
+    }
+    
+    if (!objectNameQuestion) {
+      return res.status(400).json({
+        success: false,
+        error: 'Object name question is required'
       });
     }
     
@@ -207,6 +201,7 @@ router.post('/', async (req, res) => {
       urlName: urlName.trim(),
       mapQuestion: mapQuestion.trim(),
       mapQuestion2: mapQuestion2 ? mapQuestion2.trim() : '',
+      objectNameQuestion: objectNameQuestion ? objectNameQuestion.trim() : 'Name something that represents your perspective',
       xAxis: {
         label: xAxis.label.trim(),
         min: xAxis.min.trim(),
@@ -218,17 +213,7 @@ router.post('/', async (req, res) => {
         max: yAxis.max.trim()
       },
       commentQuestion: commentQuestion.trim(),
-      quadrants: quadrants ? {
-        q1: quadrants.q1 ? quadrants.q1.trim() : 'Q1 (++)',
-        q2: quadrants.q2 ? quadrants.q2.trim() : 'Q2 (-+)',
-        q3: quadrants.q3 ? quadrants.q3.trim() : 'Q3 (--)',
-        q4: quadrants.q4 ? quadrants.q4.trim() : 'Q4 (+-)'
-      } : {
-        q1: 'Q1 (++)',
-        q2: 'Q2 (-+)',
-        q3: 'Q3 (--)',
-        q4: 'Q4 (+-)'
-      },
+      starterData: starterData ? starterData.trim() : '',
       status: 'active',
       participants: [],
       ratings: [],
@@ -449,7 +434,7 @@ router.post('/:id/participants', async (req, res) => {
 // Submit rating
 router.post('/:id/rating', async (req, res) => {
   try {
-    const { userId, position } = req.body;
+    const { userId, position, objectName } = req.body;
     
     if (!userId || !position || typeof position.x !== 'number' || typeof position.y !== 'number') {
       return res.status(400).json({
@@ -490,7 +475,7 @@ router.post('/:id/rating', async (req, res) => {
       });
     }
     
-    const updatedActivity = await activity.addRating(userId, participant.username, position);
+    const updatedActivity = await activity.addRating(userId, participant.username, position, objectName);
     
     // Return the new rating
     const newRating = updatedActivity.ratings.find(r => r.userId === userId);
