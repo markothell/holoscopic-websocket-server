@@ -12,21 +12,14 @@ router.get('/admin', async (req, res) => {
       .sort({ createdAt: -1 })
       .select('-__v');
     
-    // Transform _id to id for frontend compatibility and ensure quadrants exist
+    // Transform _id to id for frontend compatibility
     const transformedActivities = activities.map(activity => {
       const activityObj = activity.toObject();
       return {
         ...activityObj,
         id: activity._id.toString(),
         // Ensure isDraft field exists with default false for existing activities
-        isDraft: activityObj.isDraft !== undefined ? activityObj.isDraft : false,
-        // Ensure quadrants field exists with defaults if missing
-        quadrants: activityObj.quadrants || {
-          q1: 'Q1 (++)',
-          q2: 'Q2 (-+)',
-          q3: 'Q3 (--)',
-          q4: 'Q4 (+-)'
-        }
+        isDraft: activityObj.isDraft !== undefined ? activityObj.isDraft : false
       };
     });
     
@@ -53,21 +46,14 @@ router.get('/', async (req, res) => {
       .sort({ createdAt: -1 })
       .select('-__v');
     
-    // Transform _id to id for frontend compatibility and ensure quadrants exist
+    // Transform _id to id for frontend compatibility
     const transformedActivities = activities.map(activity => {
       const activityObj = activity.toObject();
       return {
         ...activityObj,
         id: activity._id.toString(),
         // Ensure isDraft field exists with default false for existing activities
-        isDraft: activityObj.isDraft !== undefined ? activityObj.isDraft : false,
-        // Ensure quadrants field exists with defaults if missing
-        quadrants: activityObj.quadrants || {
-          q1: 'Q1 (++)',
-          q2: 'Q2 (-+)',
-          q3: 'Q3 (--)',
-          q4: 'Q4 (+-)'
-        }
+        isDraft: activityObj.isDraft !== undefined ? activityObj.isDraft : false
       };
     });
     
@@ -123,21 +109,24 @@ router.get('/by-url/:urlName', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const activity = await Activity.findById(req.params.id).select('-__v');
-    
+
     if (!activity) {
       return res.status(404).json({
         success: false,
         error: 'Activity not found'
       });
     }
-    
+
     // Transform _id to id for frontend compatibility
     const activityObj = activity.toObject();
     const transformedActivity = {
       ...activityObj,
       id: activity._id.toString()
     };
-    
+
+    console.log('Fetched activity by ID - preamble:', transformedActivity.preamble);
+    console.log('Fetched activity by ID - wikiLink:', transformedActivity.wikiLink);
+
     res.json({
       success: true,
       data: transformedActivity
@@ -159,25 +148,23 @@ router.post('/', async (req, res) => {
       urlName,
       mapQuestion,
       mapQuestion2,
-      objectNameQuestion,
       xAxis,
       yAxis,
       commentQuestion,
+      objectNameQuestion,
+      preamble,
+      wikiLink,
       starterData
     } = req.body;
-    
+
+    console.log('Create activity - preamble:', preamble);
+    console.log('Create activity - wikiLink:', wikiLink);
+
     // Validate required fields
     if (!title || !urlName || !mapQuestion || !commentQuestion) {
       return res.status(400).json({
         success: false,
         error: 'Title, URL name, map question, and comment question are required'
-      });
-    }
-    
-    if (!objectNameQuestion) {
-      return res.status(400).json({
-        success: false,
-        error: 'Object name question is required'
       });
     }
     
@@ -201,7 +188,6 @@ router.post('/', async (req, res) => {
       urlName: urlName.trim(),
       mapQuestion: mapQuestion.trim(),
       mapQuestion2: mapQuestion2 ? mapQuestion2.trim() : '',
-      objectNameQuestion: objectNameQuestion ? objectNameQuestion.trim() : 'Name something that represents your perspective',
       xAxis: {
         label: xAxis.label.trim(),
         min: xAxis.min.trim(),
@@ -213,6 +199,9 @@ router.post('/', async (req, res) => {
         max: yAxis.max.trim()
       },
       commentQuestion: commentQuestion.trim(),
+      objectNameQuestion: objectNameQuestion ? objectNameQuestion.trim() : 'Name something that represents your perspective',
+      preamble: preamble ? preamble.trim() : '',
+      wikiLink: wikiLink ? wikiLink.trim() : '',
       starterData: starterData ? starterData.trim() : '',
       status: 'active',
       participants: [],
@@ -222,18 +211,45 @@ router.post('/', async (req, res) => {
     
     const savedActivity = await activity.save();
     
-    // Transform _id to id for frontend compatibility and ensure quadrants exist
+    // Process starter data if provided
+    if (starterData && starterData.trim()) {
+      try {
+        const parsed = JSON.parse(starterData);
+        if (Array.isArray(parsed)) {
+          // Add each starter data item as a rating and comment
+          for (let i = 0; i < parsed.length; i++) {
+            const item = parsed[i];
+            if (item && typeof item === 'object' && 
+                typeof item.x === 'number' && typeof item.y === 'number' &&
+                item.x >= 0 && item.x <= 1 && item.y >= 0 && item.y <= 1 &&
+                item.objectName && item.comment) {
+              
+              const starterUserId = `starter_${savedActivity._id}_${i}`;
+              const starterUsername = 'Example Data';  // Clear indicator this is seed data
+              
+              // Add as participant
+              await savedActivity.addParticipant(starterUserId, starterUsername);
+              
+              // Add rating with position
+              await savedActivity.addRating(starterUserId, starterUsername, 
+                { x: item.x, y: item.y }, item.objectName);
+              
+              // Add comment
+              await savedActivity.addComment(starterUserId, starterUsername, 
+                item.comment, item.objectName);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to process starter data:', e);
+      }
+    }
+    
+    // Transform _id to id for frontend compatibility
     const activityObj = savedActivity.toObject();
     const transformedActivity = {
       ...activityObj,
-      id: savedActivity._id.toString(),
-      // Ensure quadrants field exists with defaults if missing
-      quadrants: activityObj.quadrants || {
-        q1: 'Q1 (++)',
-        q2: 'Q2 (-+)',
-        q3: 'Q3 (--)',
-        q4: 'Q4 (+-)'
-      }
+      id: savedActivity._id.toString()
     };
     
     res.status(201).json({
@@ -262,7 +278,7 @@ router.patch('/:id', async (req, res) => {
     }
     
     // Update allowed fields
-    const allowedUpdates = ['title', 'urlName', 'mapQuestion', 'mapQuestion2', 'xAxis', 'yAxis', 'commentQuestion', 'quadrants', 'status'];
+    const allowedUpdates = ['title', 'urlName', 'mapQuestion', 'mapQuestion2', 'xAxis', 'yAxis', 'commentQuestion', 'objectNameQuestion', 'preamble', 'wikiLink', 'starterData', 'status'];
     const updates = {};
     
     for (const key of allowedUpdates) {
@@ -273,6 +289,8 @@ router.patch('/:id', async (req, res) => {
     
     console.log('Update request body:', req.body);
     console.log('Updates to apply:', updates);
+    console.log('Preamble in request:', req.body.preamble);
+    console.log('WikiLink in request:', req.body.wikiLink);
     console.log('Activity before update:', activity.toObject());
     
     // Apply updates
@@ -291,18 +309,11 @@ router.patch('/:id', async (req, res) => {
     const updatedActivity = await activity.save();
     console.log('Activity after save:', updatedActivity.toObject());
     
-    // Transform _id to id for frontend compatibility and ensure quadrants exist
+    // Transform _id to id for frontend compatibility
     const activityObj = updatedActivity.toObject();
     const transformedActivity = {
       ...activityObj,
-      id: updatedActivity._id.toString(),
-      // Ensure quadrants field exists with defaults if missing
-      quadrants: activityObj.quadrants || {
-        q1: 'Q1 (++)',
-        q2: 'Q2 (-+)',
-        q3: 'Q3 (--)',
-        q4: 'Q4 (+-)'
-      }
+      id: updatedActivity._id.toString()
     };
     
     res.json({
@@ -373,13 +384,7 @@ router.patch('/:id/draft', async (req, res) => {
     const activityObj = updatedActivity.toObject();
     const transformedActivity = {
       ...activityObj,
-      id: updatedActivity._id.toString(),
-      quadrants: activityObj.quadrants || {
-        q1: 'Q1 (++)',
-        q2: 'Q2 (-+)',
-        q3: 'Q3 (--)',
-        q4: 'Q4 (+-)'
-      }
+      id: updatedActivity._id.toString()
     };
     
     res.json({
@@ -511,7 +516,7 @@ router.post('/:id/rating', async (req, res) => {
 // Submit comment
 router.post('/:id/comment', async (req, res) => {
   try {
-    const { userId, text } = req.body;
+    const { userId, text, objectName } = req.body;
     
     if (!userId || !text || typeof text !== 'string') {
       return res.status(400).json({
@@ -559,7 +564,7 @@ router.post('/:id/comment', async (req, res) => {
       });
     }
     
-    await activity.addComment(userId, participant.username, text.trim());
+    await activity.addComment(userId, participant.username, text.trim(), objectName || participant.objectName);
     
     // Return the new comment
     const newComment = activity.comments.find(c => c.userId === userId);
@@ -740,6 +745,92 @@ router.get('/:id/analytics', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch analytics'
+    });
+  }
+});
+
+// Sync starter data to database
+router.post('/:id/sync-starter-data', async (req, res) => {
+  try {
+    const activity = await Activity.findById(req.params.id);
+    
+    if (!activity) {
+      return res.status(404).json({
+        success: false,
+        error: 'Activity not found'
+      });
+    }
+
+    // Remove existing starter data participants/ratings/comments
+    // Filter by both ID pattern and username to catch all starter data
+    activity.participants = activity.participants.filter(p => 
+      !p.id.startsWith('starter_') && p.username !== 'Example Data'
+    );
+    activity.ratings = activity.ratings.filter(r => 
+      !r.userId.startsWith('starter_') && r.username !== 'Example Data'
+    );
+    activity.comments = activity.comments.filter(c => 
+      !c.userId.startsWith('starter_') && c.username !== 'Example Data'
+    );
+
+    // Process current starter data if it exists
+    if (activity.starterData && activity.starterData.trim()) {
+      try {
+        const parsed = JSON.parse(activity.starterData);
+        if (Array.isArray(parsed)) {
+          // Add each starter data item as a rating and comment
+          for (let i = 0; i < parsed.length; i++) {
+            const item = parsed[i];
+            if (item && typeof item === 'object' && 
+                typeof item.x === 'number' && typeof item.y === 'number' &&
+                item.x >= 0 && item.x <= 1 && item.y >= 0 && item.y <= 1 &&
+                item.objectName && item.comment) {
+              
+              const starterUserId = `starter_${activity._id}_${i}`;
+              const starterUsername = 'Example Data';
+              
+              // Add as participant
+              await activity.addParticipant(starterUserId, starterUsername);
+              
+              // Add rating with position
+              await activity.addRating(starterUserId, starterUsername, 
+                { x: item.x, y: item.y }, item.objectName);
+              
+              // Add comment
+              await activity.addComment(starterUserId, starterUsername, 
+                item.comment, item.objectName);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to process starter data:', e);
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid starter data format'
+        });
+      }
+    }
+
+    const updatedActivity = await activity.save();
+
+    // Transform response
+    const activityObj = updatedActivity.toObject();
+    const transformedActivity = {
+      ...activityObj,
+      id: updatedActivity._id.toString()
+    };
+
+    res.json({
+      success: true,
+      data: transformedActivity,
+      message: 'Starter data synced successfully'
+    });
+
+  } catch (error) {
+    console.error('Error syncing starter data:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to sync starter data'
     });
   }
 });

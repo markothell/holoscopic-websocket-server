@@ -42,14 +42,6 @@ const ActivitySchema = new mongoose.Schema({
     default: ''
   },
   
-  objectNameQuestion: {
-    type: String,
-    required: true,
-    trim: true,
-    maxlength: 200,
-    default: 'Name something that represents your perspective'
-  },
-  
   xAxis: {
     label: {
       type: String,
@@ -100,12 +92,69 @@ const ActivitySchema = new mongoose.Schema({
     maxlength: 200
   },
   
-  // Starter data for seeding the activity
+  // Whorl-specific fields
+  objectNameQuestion: {
+    type: String,
+    required: true,
+    trim: true,
+    maxlength: 200,
+    default: 'Name something that represents your perspective'
+  },
+  
   starterData: {
     type: String,
     required: false,
     trim: true,
-    maxlength: 5000
+    default: ''
+  },
+
+  // Activity description and wiki link
+  preamble: {
+    type: String,
+    required: false,
+    trim: true,
+    maxlength: 500,
+    default: ''
+  },
+
+  wikiLink: {
+    type: String,
+    required: false,
+    trim: true,
+    maxlength: 200,
+    default: ''
+  },
+  
+  // Quadrant labels
+  quadrants: {
+    q1: {
+      type: String,
+      required: false,
+      trim: true,
+      maxlength: 20,
+      default: 'Q1 (++)'
+    },
+    q2: {
+      type: String,
+      required: false,
+      trim: true,
+      maxlength: 20,
+      default: 'Q2 (-+)'
+    },
+    q3: {
+      type: String,
+      required: false,
+      trim: true,
+      maxlength: 20,
+      default: 'Q3 (--)'
+    },
+    q4: {
+      type: String,
+      required: false,
+      trim: true,
+      maxlength: 20,
+      default: 'Q4 (+-)'
+    }
   },
   
   // Activity state
@@ -120,6 +169,7 @@ const ActivitySchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+
   
   // Participant data
   participants: [{
@@ -217,6 +267,17 @@ const ActivitySchema = new mongoose.Schema({
       trim: true,
       maxlength: 25
     },
+    quadrantName: {
+      type: String,
+      required: false,
+      trim: true,
+      maxlength: 20
+    },
+    quadrant: {
+      type: String,
+      required: false,
+      enum: ['q1', 'q2', 'q3', 'q4']
+    },
     text: {
       type: String,
       required: true,
@@ -285,20 +346,32 @@ ActivitySchema.index({ 'comments.timestamp': -1 });
 ActivitySchema.index({ 'comments.voteCount': -1 });
 
 // Helper methods
-ActivitySchema.methods.addParticipant = function(userId, username) {
-  // Remove existing participant with same ID
-  this.participants = this.participants.filter(p => p.id !== userId);
-  
-  // Add new participant
-  this.participants.push({
-    id: userId,
-    username: username,
-    isConnected: true,
-    hasSubmitted: false,
-    joinedAt: new Date()
-  });
-  
-  return this.save();
+ActivitySchema.methods.addParticipant = async function(userId, username) {
+  try {
+    // Check if participant already exists
+    const existingParticipant = this.participants.find(p => p.id === userId);
+
+    if (existingParticipant) {
+      // Update existing participant
+      existingParticipant.username = username;
+      existingParticipant.isConnected = true;
+      existingParticipant.joinedAt = new Date();
+    } else {
+      // Add new participant
+      this.participants.push({
+        id: userId,
+        username: username,
+        isConnected: true,
+        hasSubmitted: false,
+        joinedAt: new Date()
+      });
+    }
+
+    return await this.save();
+  } catch (error) {
+    console.error('Error in addParticipant:', error);
+    throw error;
+  }
 };
 
 ActivitySchema.methods.updateParticipantConnection = function(userId, isConnected) {
@@ -323,7 +396,7 @@ ActivitySchema.methods.addRating = async function(userId, username, position, ob
         id: ratingId,
         userId: userId,
         username: username,
-        objectName: objectName,
+        objectName: objectName || '',
         position: position,
         timestamp: new Date()
       };
@@ -335,8 +408,8 @@ ActivitySchema.methods.addRating = async function(userId, username, position, ob
           $pull: { ratings: { userId: userId } }, // Remove existing rating
           $set: { 
             'participants.$[elem].hasSubmitted': true,
-            'participants.$[elem].objectName': objectName,
-            'comments.$[comment].objectName': objectName
+            'participants.$[elem].objectName': objectName || '',
+            'comments.$[comment].objectName': objectName || ''
           }
         },
         {
@@ -381,25 +454,12 @@ ActivitySchema.methods.addComment = function(userId, username, text, objectName)
   // Remove existing comment from same user
   this.comments = this.comments.filter(c => c.userId !== userId);
   
-  // Get objectName from user's rating or participant data if not provided
-  if (!objectName) {
-    const userRating = this.ratings.find(r => r.userId === userId);
-    if (userRating) {
-      objectName = userRating.objectName;
-    } else {
-      const participant = this.participants.find(p => p.id === userId);
-      if (participant) {
-        objectName = participant.objectName;
-      }
-    }
-  }
-  
   // Add new comment
   this.comments.push({
     id: commentId,
     userId: userId,
     username: username,
-    objectName: objectName,
+    objectName: objectName || '',
     text: text,
     timestamp: new Date(),
     votes: [],
