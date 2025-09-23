@@ -171,12 +171,8 @@ function loadAPIRoutes() {
     try {
       const activityRoutes = require('./routes/activities')(io);
       const analyticsRoutes = require('./routes/analytics')();
-      const composedActivityRoutes = require('./routes/composedActivities');
-
       app.use('/api/activities', activityRoutes);
       app.use('/api/analytics', analyticsRoutes);
-      app.use('/api/composed-activities', composedActivityRoutes);
-
       apiRoutesLoaded = true;
       console.log('✅ API routes loaded successfully');
     } catch (error) {
