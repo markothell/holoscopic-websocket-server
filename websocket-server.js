@@ -171,8 +171,14 @@ function loadAPIRoutes() {
     try {
       const activityRoutes = require('./routes/activities')(io);
       const analyticsRoutes = require('./routes/analytics')();
+      const sequenceRoutes = require('./routes/sequences');
+      const authRoutes = require('./routes/auth');
+      const userRoutes = require('./routes/users');
       app.use('/api/activities', activityRoutes);
       app.use('/api/analytics', analyticsRoutes);
+      app.use('/api/sequences', sequenceRoutes);
+      app.use('/api/auth', authRoutes);
+      app.use('/api/users', userRoutes);
       apiRoutesLoaded = true;
       console.log('✅ API routes loaded successfully');
     } catch (error) {
@@ -346,7 +352,7 @@ io.on('connection', (socket) => {
     
     // Update database
     await safeDbOperation(async () => {
-      const activity = await Activity.findById(activityId);
+      const activity = await Activity.findOne({ id: activityId });
       if (activity) {
         await activity.addParticipant(userId, username);
         console.log(`💾 Added participant ${username} to database`);
@@ -396,7 +402,7 @@ io.on('connection', (socket) => {
       
       // Update database
       await safeDbOperation(async () => {
-        const activity = await Activity.findById(activityId);
+        const activity = await Activity.findOne({ id: activityId });
         if (activity) {
           await activity.updateParticipantConnection(userId, false);
         }
@@ -422,7 +428,7 @@ io.on('connection', (socket) => {
       // Update database
       let newRating = null;
       await safeDbOperation(async () => {
-        const activity = await Activity.findById(activityId);
+        const activity = await Activity.findOne({ id: activityId });
         if (activity) {
           const participant = activity.participants.find(p => p.id === userId);
           if (participant) {
@@ -454,7 +460,7 @@ io.on('connection', (socket) => {
       // Update database
       let newComment = null;
       await safeDbOperation(async () => {
-        const activity = await Activity.findById(activityId);
+        const activity = await Activity.findOne({ id: activityId });
         if (activity) {
           const participant = activity.participants.find(p => p.id === userId);
           if (participant) {
@@ -499,7 +505,7 @@ io.on('connection', (socket) => {
           
           // Update database
           await safeDbOperation(async () => {
-            const activity = await Activity.findById(activityId);
+            const activity = await Activity.findOne({ id: activityId });
             if (activity) {
               await activity.updateParticipantConnection(userId, false);
             }

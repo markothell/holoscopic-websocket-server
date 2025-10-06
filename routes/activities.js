@@ -11,13 +11,14 @@ router.get('/admin', async (req, res) => {
     const activities = await Activity.find({})
       .sort({ createdAt: -1 })
       .select('-__v');
-    
-    // Transform _id to id for frontend compatibility
+
+    // Use the custom id field, not MongoDB's _id
     const transformedActivities = activities.map(activity => {
       const activityObj = activity.toObject();
       return {
         ...activityObj,
-        id: activity._id.toString(),
+        // Keep the custom id field if it exists, otherwise fallback to _id
+        id: activityObj.id || activity._id.toString(),
         // Ensure isDraft field exists with default false for existing activities
         isDraft: activityObj.isDraft !== undefined ? activityObj.isDraft : false
       };
@@ -46,17 +47,18 @@ router.get('/', async (req, res) => {
       .sort({ createdAt: -1 })
       .select('-__v');
     
-    // Transform _id to id for frontend compatibility
+    // Use the custom id field, not MongoDB's _id
     const transformedActivities = activities.map(activity => {
       const activityObj = activity.toObject();
       return {
         ...activityObj,
-        id: activity._id.toString(),
+        // Keep the custom id field if it exists, otherwise fallback to _id
+        id: activityObj.id || activity._id.toString(),
         // Ensure isDraft field exists with default false for existing activities
         isDraft: activityObj.isDraft !== undefined ? activityObj.isDraft : false
       };
     });
-    
+
     res.json({
       success: true,
       data: {
@@ -85,13 +87,13 @@ router.get('/by-url/:urlName', async (req, res) => {
       });
     }
     
-    // Transform _id to id for frontend compatibility
+    // Use the custom id field, not MongoDB's _id
     const activityObj = activity.toObject();
     const transformedActivity = {
       ...activityObj,
-      id: activity._id.toString()
+      id: activityObj.id || activity._id.toString() // Fallback to _id if custom id doesn't exist
     };
-    
+
     res.json({
       success: true,
       data: transformedActivity
@@ -108,7 +110,7 @@ router.get('/by-url/:urlName', async (req, res) => {
 // Get single activity
 router.get('/:id', async (req, res) => {
   try {
-    const activity = await Activity.findById(req.params.id).select('-__v');
+    const activity = await Activity.findOne({ id: req.params.id }).select('-__v');
 
     if (!activity) {
       return res.status(404).json({
@@ -117,11 +119,11 @@ router.get('/:id', async (req, res) => {
       });
     }
 
-    // Transform _id to id for frontend compatibility
+    // Use the custom id field, not MongoDB's _id
     const activityObj = activity.toObject();
     const transformedActivity = {
       ...activityObj,
-      id: activity._id.toString()
+      id: activityObj.id || activity._id.toString() // Fallback to _id if custom id doesn't exist
     };
 
     console.log('Fetched activity by ID - preamble:', transformedActivity.preamble);
@@ -154,7 +156,10 @@ router.post('/', async (req, res) => {
       objectNameQuestion,
       preamble,
       wikiLink,
-      starterData
+      starterData,
+      votesPerUser,
+      maxEntries,
+      showProfileLinks
     } = req.body;
 
     console.log('Create activity - preamble:', preamble);
@@ -203,6 +208,9 @@ router.post('/', async (req, res) => {
       preamble: preamble ? preamble.trim() : '',
       wikiLink: wikiLink ? wikiLink.trim() : '',
       starterData: starterData ? starterData.trim() : '',
+      votesPerUser: votesPerUser !== null && votesPerUser !== undefined ? Number(votesPerUser) : null,
+      maxEntries: maxEntries && [1, 2, 4].includes(Number(maxEntries)) ? Number(maxEntries) : 1,
+      showProfileLinks: showProfileLinks !== undefined ? showProfileLinks : true,
       status: 'active',
       participants: [],
       ratings: [],
@@ -244,14 +252,14 @@ router.post('/', async (req, res) => {
         console.warn('Failed to process starter data:', e);
       }
     }
-    
-    // Transform _id to id for frontend compatibility
+
+    // Use the custom id field
     const activityObj = savedActivity.toObject();
     const transformedActivity = {
       ...activityObj,
-      id: savedActivity._id.toString()
+      id: activityObj.id || savedActivity._id.toString()
     };
-    
+
     res.status(201).json({
       success: true,
       data: transformedActivity
@@ -268,7 +276,7 @@ router.post('/', async (req, res) => {
 // Update activity
 router.patch('/:id', async (req, res) => {
   try {
-    const activity = await Activity.findById(req.params.id);
+    const activity = await Activity.findOne({ id: req.params.id });
     
     if (!activity) {
       return res.status(404).json({
@@ -278,12 +286,20 @@ router.patch('/:id', async (req, res) => {
     }
     
     // Update allowed fields
-    const allowedUpdates = ['title', 'urlName', 'mapQuestion', 'mapQuestion2', 'xAxis', 'yAxis', 'commentQuestion', 'objectNameQuestion', 'preamble', 'wikiLink', 'starterData', 'status'];
+    const allowedUpdates = ['title', 'urlName', 'mapQuestion', 'mapQuestion2', 'xAxis', 'yAxis', 'commentQuestion', 'objectNameQuestion', 'preamble', 'wikiLink', 'starterData', 'votesPerUser', 'maxEntries', 'status', 'isPublic', 'showProfileLinks'];
     const updates = {};
-    
+
     for (const key of allowedUpdates) {
       if (req.body[key] !== undefined) {
-        updates[key] = req.body[key];
+        // Validate maxEntries if present
+        if (key === 'maxEntries') {
+          const value = Number(req.body[key]);
+          if ([1, 2, 4].includes(value)) {
+            updates[key] = value;
+          }
+        } else {
+          updates[key] = req.body[key];
+        }
       }
     }
     
@@ -308,14 +324,14 @@ router.patch('/:id', async (req, res) => {
     
     const updatedActivity = await activity.save();
     console.log('Activity after save:', updatedActivity.toObject());
-    
-    // Transform _id to id for frontend compatibility
+
+    // Use the custom id field
     const activityObj = updatedActivity.toObject();
     const transformedActivity = {
       ...activityObj,
-      id: updatedActivity._id.toString()
+      id: activityObj.id || updatedActivity._id.toString()
     };
-    
+
     res.json({
       success: true,
       data: transformedActivity
@@ -329,10 +345,66 @@ router.patch('/:id', async (req, res) => {
   }
 });
 
+// Clear a slot (delete rating and comment for specific user + slot)
+// IMPORTANT: Must be before generic DELETE /:id route
+router.delete('/:id/slot', async (req, res) => {
+  try {
+    const { userId, slotNumber } = req.query;
+
+    if (!userId || !slotNumber) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID and slot number are required'
+      });
+    }
+
+    const slotNum = Number(slotNumber);
+
+    const activity = await Activity.findOne({ id: req.params.id });
+
+    if (!activity) {
+      return res.status(404).json({
+        success: false,
+        error: 'Activity not found'
+      });
+    }
+
+    // Remove rating for this user and slot
+    activity.ratings = activity.ratings.filter(r =>
+      !(r.userId === userId && (r.slotNumber || 1) === slotNum)
+    );
+
+    // Remove comment for this user and slot
+    activity.comments = activity.comments.filter(c =>
+      !(c.userId === userId && (c.slotNumber || 1) === slotNum)
+    );
+
+    await activity.save();
+
+    // Broadcast update via WebSocket
+    if (io) {
+      io.to(req.params.id).emit('activity_updated', {
+        activity: activity.toObject()
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Slot cleared successfully'
+    });
+  } catch (error) {
+    console.error('Error clearing slot:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to clear slot'
+    });
+  }
+});
+
 // Delete activity
 router.delete('/:id', async (req, res) => {
   try {
-    const activity = await Activity.findById(req.params.id);
+    const activity = await Activity.findOne({ id: req.params.id });
     
     if (!activity) {
       return res.status(404).json({
@@ -341,7 +413,7 @@ router.delete('/:id', async (req, res) => {
       });
     }
     
-    await Activity.findByIdAndDelete(req.params.id);
+    await Activity.deleteOne({ id: req.params.id });
     
     res.json({
       success: true,
@@ -368,7 +440,7 @@ router.patch('/:id/draft', async (req, res) => {
       });
     }
     
-    const activity = await Activity.findById(req.params.id);
+    const activity = await Activity.findOne({ id: req.params.id });
     
     if (!activity) {
       return res.status(404).json({
@@ -379,14 +451,14 @@ router.patch('/:id/draft', async (req, res) => {
     
     activity.isDraft = isDraft;
     const updatedActivity = await activity.save();
-    
-    // Transform _id to id for frontend compatibility
+
+    // Use the custom id field
     const activityObj = updatedActivity.toObject();
     const transformedActivity = {
       ...activityObj,
-      id: updatedActivity._id.toString()
+      id: activityObj.id || updatedActivity._id.toString()
     };
-    
+
     res.json({
       success: true,
       data: transformedActivity
@@ -412,7 +484,7 @@ router.post('/:id/participants', async (req, res) => {
       });
     }
     
-    const activity = await Activity.findById(req.params.id);
+    const activity = await Activity.findOne({ id: req.params.id });
     
     if (!activity) {
       return res.status(404).json({
@@ -439,38 +511,54 @@ router.post('/:id/participants', async (req, res) => {
 // Submit rating
 router.post('/:id/rating', async (req, res) => {
   try {
-    const { userId, position, objectName } = req.body;
-    
+    const { userId, position, objectName, slotNumber = 1 } = req.body;
+
     if (!userId || !position || typeof position.x !== 'number' || typeof position.y !== 'number') {
       return res.status(400).json({
         success: false,
         error: 'User ID and valid position are required'
       });
     }
-    
+
     if (position.x < 0 || position.x > 1 || position.y < 0 || position.y > 1) {
       return res.status(400).json({
         success: false,
         error: 'Position coordinates must be between 0 and 1'
       });
     }
-    
-    const activity = await Activity.findById(req.params.id);
-    
+
+    // Validate slotNumber
+    if (slotNumber < 1 || slotNumber > 4 || !Number.isInteger(slotNumber)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Slot number must be an integer between 1 and 4'
+      });
+    }
+
+    const activity = await Activity.findOne({ id: req.params.id });
+
     if (!activity) {
       return res.status(404).json({
         success: false,
         error: 'Activity not found'
       });
     }
-    
+
     if (activity.status !== 'active') {
       return res.status(400).json({
         success: false,
         error: 'Activity is not active'
       });
     }
-    
+
+    // Validate slot number against activity's maxEntries
+    if (slotNumber > (activity.maxEntries || 1)) {
+      return res.status(400).json({
+        success: false,
+        error: `This activity only allows ${activity.maxEntries || 1} entry slot(s)`
+      });
+    }
+
     // Find participant to get username
     const participant = activity.participants.find(p => p.id === userId);
     if (!participant) {
@@ -479,27 +567,27 @@ router.post('/:id/rating', async (req, res) => {
         error: 'User is not a participant in this activity'
       });
     }
-    
-    const updatedActivity = await activity.addRating(userId, participant.username, position, objectName);
-    
+
+    const updatedActivity = await activity.addRating(userId, participant.username, position, objectName, slotNumber);
+
     // Return the new rating
-    const newRating = updatedActivity.ratings.find(r => r.userId === userId);
-    
+    const newRating = updatedActivity.ratings.find(r => r.userId === userId && r.slotNumber === slotNumber);
+
     // Broadcast to WebSocket clients
     if (io && newRating) {
       io.to(req.params.id).emit('rating_added', {
         rating: newRating
       });
-      
-      // Also broadcast updated comment if user has one
-      const updatedComment = updatedActivity.comments.find(c => c.userId === userId);
+
+      // Also broadcast updated comment if user has one for this slot
+      const updatedComment = updatedActivity.comments.find(c => c.userId === userId && c.slotNumber === slotNumber);
       if (updatedComment) {
         io.to(req.params.id).emit('comment_updated', {
           comment: updatedComment
         });
       }
     }
-    
+
     res.json({
       success: true,
       data: newRating
@@ -516,45 +604,61 @@ router.post('/:id/rating', async (req, res) => {
 // Submit comment
 router.post('/:id/comment', async (req, res) => {
   try {
-    const { userId, text, objectName } = req.body;
-    
+    const { userId, text, objectName, slotNumber = 1 } = req.body;
+
     if (!userId || !text || typeof text !== 'string') {
       return res.status(400).json({
         success: false,
         error: 'User ID and comment text are required'
       });
     }
-    
+
     if (text.trim().length === 0) {
       return res.status(400).json({
         success: false,
         error: 'Comment text cannot be empty'
       });
     }
-    
+
     if (text.length > 500) {
       return res.status(400).json({
         success: false,
         error: 'Comment must be less than 500 characters'
       });
     }
-    
-    const activity = await Activity.findById(req.params.id);
-    
+
+    // Validate slotNumber
+    if (slotNumber < 1 || slotNumber > 4 || !Number.isInteger(slotNumber)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Slot number must be an integer between 1 and 4'
+      });
+    }
+
+    const activity = await Activity.findOne({ id: req.params.id });
+
     if (!activity) {
       return res.status(404).json({
         success: false,
         error: 'Activity not found'
       });
     }
-    
+
     if (activity.status !== 'active') {
       return res.status(400).json({
         success: false,
         error: 'Activity is not active'
       });
     }
-    
+
+    // Validate slot number against activity's maxEntries
+    if (slotNumber > (activity.maxEntries || 1)) {
+      return res.status(400).json({
+        success: false,
+        error: `This activity only allows ${activity.maxEntries || 1} entry slot(s)`
+      });
+    }
+
     // Find participant to get username
     const participant = activity.participants.find(p => p.id === userId);
     if (!participant) {
@@ -563,19 +667,19 @@ router.post('/:id/comment', async (req, res) => {
         error: 'User is not a participant in this activity'
       });
     }
-    
-    await activity.addComment(userId, participant.username, text.trim(), objectName || participant.objectName);
-    
+
+    await activity.addComment(userId, participant.username, text.trim(), objectName || participant.objectName, slotNumber);
+
     // Return the new comment
-    const newComment = activity.comments.find(c => c.userId === userId);
-    
+    const newComment = activity.comments.find(c => c.userId === userId && c.slotNumber === slotNumber);
+
     // Broadcast to WebSocket clients
     if (io && newComment) {
       io.to(req.params.id).emit('comment_added', {
         comment: newComment
       });
     }
-    
+
     res.json({
       success: true,
       data: newComment
@@ -601,7 +705,7 @@ router.post('/:id/comment/:commentId/vote', async (req, res) => {
       });
     }
     
-    const activity = await Activity.findById(req.params.id);
+    const activity = await Activity.findOne({ id: req.params.id });
     
     if (!activity) {
       return res.status(404).json({
@@ -644,9 +748,18 @@ router.post('/:id/comment/:commentId/vote', async (req, res) => {
     });
   } catch (error) {
     console.error('Error voting on comment:', error);
+
+    // Check if it's a vote limit error
+    if (error.message && error.message.includes('Vote limit reached')) {
+      return res.status(400).json({
+        success: false,
+        error: error.message
+      });
+    }
+
     res.status(500).json({
       success: false,
-      error: 'Failed to vote on comment'
+      error: error.message || 'Failed to vote on comment'
     });
   }
 });
@@ -672,7 +785,7 @@ router.post('/:id/email', async (req, res) => {
       });
     }
     
-    const activity = await Activity.findById(req.params.id);
+    const activity = await Activity.findOne({ id: req.params.id });
     
     if (!activity) {
       return res.status(404).json({
@@ -722,7 +835,7 @@ router.post('/:id/email', async (req, res) => {
 // Get analytics stats for a specific activity
 router.get('/:id/analytics', async (req, res) => {
   try {
-    const activity = await Activity.findById(req.params.id);
+    const activity = await Activity.findOne({ id: req.params.id });
     
     if (!activity) {
       return res.status(404).json({
@@ -752,7 +865,7 @@ router.get('/:id/analytics', async (req, res) => {
 // Sync starter data to database
 router.post('/:id/sync-starter-data', async (req, res) => {
   try {
-    const activity = await Activity.findById(req.params.id);
+    const activity = await Activity.findOne({ id: req.params.id });
     
     if (!activity) {
       return res.status(404).json({
