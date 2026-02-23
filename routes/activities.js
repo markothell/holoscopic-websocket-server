@@ -5,10 +5,23 @@ const Activity = require('../models/Activity');
 module.exports = function(io) {
   const router = express.Router();
 
+  // Helper to check if activity is in solo tracker mode
+  const isSoloTrackerMode = (activity) => activity.maxEntries === 0;
+
+  // Helper to check if user is the activity creator
+  const isActivityCreator = (activity, userId) => {
+    return activity.author?.userId && activity.author.userId === userId;
+  };
+
 // Get all activities (admin endpoint - includes drafts)
+// Optional ?createdBy=userId to scope to a specific creator
 router.get('/admin', async (req, res) => {
   try {
-    const activities = await Activity.find({})
+    const query = {};
+    if (req.query.createdBy) {
+      query['author.userId'] = req.query.createdBy;
+    }
+    const activities = await Activity.find(query)
       .sort({ createdAt: -1 })
       .select('-__v');
 
@@ -93,6 +106,12 @@ router.get('/by-url/:urlName', async (req, res) => {
       ...activityObj,
       id: activityObj.id || activity._id.toString() // Fallback to _id if custom id doesn't exist
     };
+
+    console.log('=== FETCHING ACTIVITY BY URL ===');
+    console.log('URL name:', req.params.urlName);
+    console.log('Activity ID:', transformedActivity.id);
+    console.log('Activity Type:', transformedActivity.activityType);
+    console.log('Activity Title:', transformedActivity.title);
 
     res.json({
       success: true,
@@ -184,9 +203,13 @@ router.get('/:id', async (req, res) => {
 // Create new activity
 router.post('/', async (req, res) => {
   try {
+    console.log('=== CREATE ACTIVITY REQUEST RECEIVED ===');
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+
     const {
       title,
       urlName,
+      activityType,
       mapQuestion,
       mapQuestion2,
       xAxis,
@@ -198,9 +221,11 @@ router.post('/', async (req, res) => {
       starterData,
       votesPerUser,
       maxEntries,
-      showProfileLinks
+      showProfileLinks,
+      author
     } = req.body;
 
+    console.log('Create activity - activityType:', activityType);
     console.log('Create activity - preamble:', preamble);
     console.log('Create activity - wikiLink:', wikiLink);
 
@@ -211,14 +236,15 @@ router.post('/', async (req, res) => {
         error: 'Title, URL name, map question, and comment question are required'
       });
     }
-    
+
+    // Validate axis configuration (required for all activity types)
     if (!xAxis || !xAxis.label || !xAxis.min || !xAxis.max) {
       return res.status(400).json({
         success: false,
         error: 'X-axis configuration is required'
       });
     }
-    
+
     if (!yAxis || !yAxis.label || !yAxis.min || !yAxis.max) {
       return res.status(400).json({
         success: false,
@@ -230,6 +256,7 @@ router.post('/', async (req, res) => {
     const activity = new Activity({
       title: title.trim(),
       urlName: urlName.trim(),
+      activityType: activityType || 'holoscopic',
       mapQuestion: mapQuestion.trim(),
       mapQuestion2: mapQuestion2 ? mapQuestion2.trim() : '',
       xAxis: {
@@ -248,8 +275,14 @@ router.post('/', async (req, res) => {
       wikiLink: wikiLink ? wikiLink.trim() : '',
       starterData: starterData ? starterData.trim() : '',
       votesPerUser: votesPerUser !== null && votesPerUser !== undefined ? Number(votesPerUser) : null,
-      maxEntries: maxEntries && [1, 2, 4].includes(Number(maxEntries)) ? Number(maxEntries) : 1,
+      // maxEntries: 0 = unlimited (solo tracker mode), 1/2/4 = standard entry slots
+      maxEntries: maxEntries !== undefined && [0, 1, 2, 4].includes(Number(maxEntries)) ? Number(maxEntries) : 1,
       showProfileLinks: showProfileLinks !== undefined ? showProfileLinks : true,
+      // Auto-set author if provided (for solo tracker mode especially)
+      author: author ? {
+        userId: author.userId,
+        name: author.name
+      } : undefined,
       status: 'active',
       participants: [],
       ratings: [],
@@ -330,10 +363,10 @@ router.patch('/:id', async (req, res) => {
 
     for (const key of allowedUpdates) {
       if (req.body[key] !== undefined) {
-        // Validate maxEntries if present
+        // Validate maxEntries if present (0 = unlimited/solo tracker, 1/2/4 = standard)
         if (key === 'maxEntries') {
           const value = Number(req.body[key]);
-          if ([1, 2, 4].includes(value)) {
+          if ([0, 1, 2, 4].includes(value)) {
             updates[key] = value;
           }
         } else {
@@ -351,16 +384,7 @@ router.patch('/:id', async (req, res) => {
     // Apply updates
     Object.assign(activity, updates);
     console.log('Activity after Object.assign:', activity.toObject());
-    
-    // If quadrants were updated, update quadrantName in existing comments
-    if (updates.quadrants) {
-      activity.comments.forEach(comment => {
-        if (comment.quadrant) {
-          comment.quadrantName = activity.quadrants[comment.quadrant];
-        }
-      });
-    }
-    
+
     const updatedActivity = await activity.save();
     console.log('Activity after save:', updatedActivity.toObject());
 
@@ -566,11 +590,11 @@ router.post('/:id/rating', async (req, res) => {
       });
     }
 
-    // Validate slotNumber
-    if (slotNumber < 1 || slotNumber > 4 || !Number.isInteger(slotNumber)) {
+    // Basic slotNumber validation (must be positive integer)
+    if (slotNumber < 1 || !Number.isInteger(slotNumber)) {
       return res.status(400).json({
         success: false,
-        error: 'Slot number must be an integer between 1 and 4'
+        error: 'Slot number must be a positive integer'
       });
     }
 
@@ -590,12 +614,23 @@ router.post('/:id/rating', async (req, res) => {
       });
     }
 
-    // Validate slot number against activity's maxEntries
-    if (slotNumber > (activity.maxEntries || 1)) {
-      return res.status(400).json({
-        success: false,
-        error: `This activity only allows ${activity.maxEntries || 1} entry slot(s)`
-      });
+    // Solo Tracker Mode: maxEntries === 0 means unlimited entries but creator-only
+    if (isSoloTrackerMode(activity)) {
+      if (!isActivityCreator(activity, userId)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Only the creator can add entries to this activity'
+        });
+      }
+      // No slot limit for unlimited mode - any positive integer is valid
+    } else {
+      // Standard mode: Validate slot number against activity's maxEntries
+      if (slotNumber > (activity.maxEntries || 1)) {
+        return res.status(400).json({
+          success: false,
+          error: `This activity only allows ${activity.maxEntries || 1} entry slot(s)`
+        });
+      }
     }
 
     // Find participant to get username
@@ -669,11 +704,11 @@ router.post('/:id/comment', async (req, res) => {
       });
     }
 
-    // Validate slotNumber
-    if (slotNumber < 1 || slotNumber > 4 || !Number.isInteger(slotNumber)) {
+    // Basic slotNumber validation (must be positive integer)
+    if (slotNumber < 1 || !Number.isInteger(slotNumber)) {
       return res.status(400).json({
         success: false,
-        error: 'Slot number must be an integer between 1 and 4'
+        error: 'Slot number must be a positive integer'
       });
     }
 
@@ -693,12 +728,23 @@ router.post('/:id/comment', async (req, res) => {
       });
     }
 
-    // Validate slot number against activity's maxEntries
-    if (slotNumber > (activity.maxEntries || 1)) {
-      return res.status(400).json({
-        success: false,
-        error: `This activity only allows ${activity.maxEntries || 1} entry slot(s)`
-      });
+    // Solo Tracker Mode: maxEntries === 0 means unlimited entries but creator-only
+    if (isSoloTrackerMode(activity)) {
+      if (!isActivityCreator(activity, userId)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Only the creator can add entries to this activity'
+        });
+      }
+      // No slot limit for unlimited mode
+    } else {
+      // Standard mode: Validate slot number against activity's maxEntries
+      if (slotNumber > (activity.maxEntries || 1)) {
+        return res.status(400).json({
+          success: false,
+          error: `This activity only allows ${activity.maxEntries || 1} entry slot(s)`
+        });
+      }
     }
 
     // Find participant to get username

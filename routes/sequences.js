@@ -5,9 +5,14 @@ const Activity = require('../models/Activity');
 const User = require('../models/User');
 
 // Get all sequences (admin)
+// Optional ?createdBy=userId to scope to a specific creator
 router.get('/admin', async (req, res) => {
   try {
-    const sequences = await Sequence.find().sort({ createdAt: -1 });
+    const query = {};
+    if (req.query.createdBy) {
+      query.createdBy = req.query.createdBy;
+    }
+    const sequences = await Sequence.find(query).sort({ createdAt: -1 });
     res.json(sequences);
   } catch (error) {
     console.error('Error fetching sequences:', error);
@@ -38,6 +43,7 @@ router.get('/public', async (req, res) => {
                 id: activity.id,
                 title: activity.title,
                 urlName: activity.urlName,
+                activityType: activity.activityType,
                 status: activity.status,
                 isDraft: activity.isDraft,
                 participants: activity.participants.length,
@@ -88,6 +94,7 @@ router.get('/user/:userId', async (req, res) => {
                 id: activity.id,
                 title: activity.title,
                 urlName: activity.urlName,
+                activityType: activity.activityType,
                 status: activity.status
               } : null,
               hasParticipated
@@ -234,7 +241,7 @@ router.get('/url/:urlName', async (req, res) => {
 // Create new sequence
 router.post('/', async (req, res) => {
   try {
-    const { title, urlName, description, welcomePage, activities } = req.body;
+    const { title, urlName, description, welcomePage, activities, createdBy } = req.body;
 
     // Validate required fields
     if (!title || !urlName) {
@@ -251,6 +258,7 @@ router.post('/', async (req, res) => {
       title,
       urlName,
       description: description || '',
+      createdBy: createdBy || undefined,
       welcomePage: welcomePage || {
         enabled: false,
         requestName: false,

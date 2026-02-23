@@ -34,6 +34,12 @@ const SequenceSchema = new mongoose.Schema({
     default: ''
   },
 
+  // Creator (user who created this sequence)
+  createdBy: {
+    type: String,
+    required: false
+  },
+
   // Welcome page settings
   welcomePage: {
     type: {
@@ -98,7 +104,11 @@ const SequenceSchema = new mongoose.Schema({
     closedAt: {
       type: Date,
       default: null
-    }
+    },
+    // Parent activity IDs for DAG relationships (empty = root node)
+    parentActivityIds: [{
+      type: String
+    }]
   }],
 
   // Cohort members (user IDs)
@@ -158,7 +168,6 @@ const SequenceSchema = new mongoose.Schema({
 // Indexes for performance
 SequenceSchema.index({ status: 1, createdAt: -1 });
 SequenceSchema.index({ 'members.userId': 1 });
-SequenceSchema.index({ urlName: 1 });
 
 // Helper methods
 SequenceSchema.methods.addMember = async function(userId, email) {
@@ -212,6 +221,13 @@ SequenceSchema.methods.removeInvitedEmail = async function(email) {
   try {
     const normalizedEmail = email.toLowerCase().trim();
     this.invitedEmails = this.invitedEmails.filter(e => e !== normalizedEmail);
+
+    // Also remove from members if they're enrolled with this email
+    this.members = this.members.filter(m => {
+      const memberEmail = (m.email || '').toLowerCase().trim();
+      return memberEmail !== normalizedEmail;
+    });
+
     return await this.save();
   } catch (error) {
     console.error('Error in removeInvitedEmail:', error);

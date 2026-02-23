@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-// WeAllExplain Activity Schema - simplified for single-page functionality
+// Holoscopic Activity Schema - unified schema supporting multiple activity types
 const ActivitySchema = new mongoose.Schema({
   id: {
     type: String,
@@ -148,45 +148,23 @@ const ActivitySchema = new mongoose.Schema({
   },
 
   // Multi-entry configuration
+  // 0 = unlimited entries (solo tracker mode - creator only)
+  // 1, 2, 4 = standard entry slots per user
   maxEntries: {
     type: Number,
     required: false,
-    enum: [1, 2, 4],
+    min: 0,
     default: 1
   },
 
-  // Quadrant labels
-  quadrants: {
-    q1: {
-      type: String,
-      required: false,
-      trim: true,
-      maxlength: 20,
-      default: 'Q1 (++)'
-    },
-    q2: {
-      type: String,
-      required: false,
-      trim: true,
-      maxlength: 20,
-      default: 'Q2 (-+)'
-    },
-    q3: {
-      type: String,
-      required: false,
-      trim: true,
-      maxlength: 20,
-      default: 'Q3 (--)'
-    },
-    q4: {
-      type: String,
-      required: false,
-      trim: true,
-      maxlength: 20,
-      default: 'Q4 (+-)'
-    }
+  // Activity type - determines UI/flow behavior
+  activityType: {
+    type: String,
+    required: true,
+    enum: ['holoscopic', 'findthecenter', 'dissolve', 'resolve'],
+    default: 'dissolve'
   },
-  
+
   // Public/Private setting
   isPublic: {
     type: Boolean,
@@ -271,8 +249,8 @@ const ActivitySchema = new mongoose.Schema({
       type: Number,
       required: false,
       default: 1,
-      min: 1,
-      max: 4
+      min: 1
+      // No max limit - solo tracker mode allows unlimited slots
     },
     position: {
       x: {
@@ -320,19 +298,8 @@ const ActivitySchema = new mongoose.Schema({
       type: Number,
       required: false,
       default: 1,
-      min: 1,
-      max: 4
-    },
-    quadrantName: {
-      type: String,
-      required: false,
-      trim: true,
-      maxlength: 20
-    },
-    quadrant: {
-      type: String,
-      required: false,
-      enum: ['q1', 'q2', 'q3', 'q4']
+      min: 1
+      // No max limit - solo tracker mode allows unlimited slots
     },
     text: {
       type: String,
@@ -565,6 +532,11 @@ ActivitySchema.methods.voteComment = function(commentId, userId, username) {
     throw new Error('Comment not found');
   }
 
+  // Prevent self-voting
+  if (comment.userId === userId) {
+    throw new Error('Cannot vote on your own comment');
+  }
+
   // Check if user already voted
   const existingVote = comment.votes.find(v => v.userId === userId);
   if (existingVote) {
@@ -572,8 +544,9 @@ ActivitySchema.methods.voteComment = function(commentId, userId, username) {
     comment.votes = comment.votes.filter(v => v.userId !== userId);
     comment.voteCount = Math.max(0, comment.voteCount - 1);
   } else {
-    // Check vote limit if configured
-    if (this.votesPerUser !== null && this.votesPerUser !== undefined) {
+    // Check vote limit if configured (skip for solo tracker mode - maxEntries === 0)
+    const isSoloTracker = this.maxEntries === 0;
+    if (!isSoloTracker && this.votesPerUser !== null && this.votesPerUser !== undefined) {
       const userVoteCount = this.getUserVoteCount(userId);
       if (userVoteCount >= this.votesPerUser) {
         throw new Error(`Vote limit reached. You can only cast ${this.votesPerUser} vote(s).`);
@@ -607,7 +580,9 @@ ActivitySchema.methods.getUserVoteCount = function(userId) {
 
 // Helper method to get remaining votes for a user
 ActivitySchema.methods.getRemainingVotes = function(userId) {
-  if (this.votesPerUser === null || this.votesPerUser === undefined) {
+  // Solo tracker mode (maxEntries === 0) always has unlimited votes
+  const isSoloTracker = this.maxEntries === 0;
+  if (isSoloTracker || this.votesPerUser === null || this.votesPerUser === undefined) {
     return null; // Unlimited votes
   }
   const used = this.getUserVoteCount(userId);
