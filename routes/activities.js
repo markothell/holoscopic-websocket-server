@@ -224,7 +224,13 @@ router.post('/', async (req, res) => {
       maxEntries,
       showProfileLinks,
       showAxisLabels,
-      author
+      author,
+      // Snapshot-specific
+      snapshotQuestions,
+      xAxisPoints,
+      yAxisPoints,
+      xAxisLabels,
+      yAxisLabels
     } = req.body;
 
     console.log('Create activity - activityType:', activityType);
@@ -281,6 +287,14 @@ router.post('/', async (req, res) => {
       maxEntries: maxEntries !== undefined && [0, 1, 2, 4].includes(Number(maxEntries)) ? Number(maxEntries) : 1,
       showProfileLinks: showProfileLinks !== undefined ? showProfileLinks : true,
       showAxisLabels: showAxisLabels !== undefined ? showAxisLabels : true,
+      // Snapshot-specific fields
+      ...(activityType === 'snapshot' && {
+        snapshotQuestions: snapshotQuestions || [],
+        xAxisPoints: xAxisPoints || 2,
+        yAxisPoints: yAxisPoints || 2,
+        xAxisLabels: xAxisLabels || [],
+        yAxisLabels: yAxisLabels || [],
+      }),
       // Auto-set author if provided (for solo tracker mode especially)
       author: author ? {
         userId: author.userId,
@@ -361,7 +375,7 @@ router.patch('/:id', async (req, res) => {
     }
     
     // Update allowed fields
-    const allowedUpdates = ['title', 'urlName', 'mapQuestion', 'mapQuestion2', 'xAxis', 'yAxis', 'commentQuestion', 'objectNameQuestion', 'preamble', 'wikiLink', 'starterData', 'votesPerUser', 'maxEntries', 'status', 'isPublic', 'showProfileLinks', 'showAxisLabels', 'author'];
+    const allowedUpdates = ['title', 'urlName', 'mapQuestion', 'mapQuestion2', 'xAxis', 'yAxis', 'commentQuestion', 'objectNameQuestion', 'preamble', 'wikiLink', 'starterData', 'votesPerUser', 'maxEntries', 'status', 'isPublic', 'showProfileLinks', 'showAxisLabels', 'author', 'snapshotQuestions', 'xAxisPoints', 'yAxisPoints', 'xAxisLabels', 'yAxisLabels'];
     const updates = {};
 
     for (const key of allowedUpdates) {
@@ -593,7 +607,7 @@ router.post('/:id/participants', async (req, res) => {
 // Submit rating
 router.post('/:id/rating', async (req, res) => {
   try {
-    const { userId, position, objectName, slotNumber = 1 } = req.body;
+    const { userId, position, objectName, slotNumber = 1, questionId = null } = req.body;
 
     if (!userId || !position || typeof position.x !== 'number' || typeof position.y !== 'number') {
       return res.status(400).json({
@@ -642,8 +656,9 @@ router.post('/:id/rating', async (req, res) => {
         });
       }
       // No slot limit for unlimited mode - any positive integer is valid
-    } else {
+    } else if (activity.activityType !== 'snapshot') {
       // Standard mode: Validate slot number against activity's maxEntries
+      // Snapshot uses slotNumber to distinguish questions, not extra entries per user
       if (slotNumber > (activity.maxEntries || 1)) {
         return res.status(400).json({
           success: false,
@@ -661,7 +676,7 @@ router.post('/:id/rating', async (req, res) => {
       });
     }
 
-    const updatedActivity = await activity.addRating(userId, participant.username, position, objectName, slotNumber);
+    const updatedActivity = await activity.addRating(userId, participant.username, position, objectName, slotNumber, questionId);
 
     // Return the new rating
     const newRating = updatedActivity.ratings.find(r => r.userId === userId && r.slotNumber === slotNumber);
@@ -700,7 +715,7 @@ router.post('/:id/comment', async (req, res) => {
   console.log(`💬 [COMMENT] Request received - Activity: ${req.params.id}, User: ${req.body.userId}, Slot: ${req.body.slotNumber}`);
 
   try {
-    const { userId, text, objectName, slotNumber = 1 } = req.body;
+    const { userId, text, objectName, slotNumber = 1, questionId = null } = req.body;
 
     if (!userId || !text || typeof text !== 'string') {
       return res.status(400).json({
@@ -756,8 +771,9 @@ router.post('/:id/comment', async (req, res) => {
         });
       }
       // No slot limit for unlimited mode
-    } else {
+    } else if (activity.activityType !== 'snapshot') {
       // Standard mode: Validate slot number against activity's maxEntries
+      // Snapshot uses slotNumber to distinguish questions, not extra entries per user
       if (slotNumber > (activity.maxEntries || 1)) {
         return res.status(400).json({
           success: false,
@@ -777,7 +793,7 @@ router.post('/:id/comment', async (req, res) => {
 
     console.log(`💬 [COMMENT] Saving to DB...`);
     const dbStart = Date.now();
-    await activity.addComment(userId, participant.username, text.trim(), objectName || participant.objectName, slotNumber);
+    await activity.addComment(userId, participant.username, text.trim(), objectName || participant.objectName, slotNumber, questionId);
     console.log(`💬 [COMMENT] DB save took ${Date.now() - dbStart}ms`);
 
     // Return the new comment

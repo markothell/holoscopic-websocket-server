@@ -161,9 +161,25 @@ const ActivitySchema = new mongoose.Schema({
   activityType: {
     type: String,
     required: true,
-    enum: ['holoscopic', 'findthecenter', 'dissolve', 'resolve'],
+    enum: ['holoscopic', 'findthecenter', 'dissolve', 'resolve', 'snapshot'],
     default: 'dissolve'
   },
+
+  // Snapshot-specific: multiple named questions sharing one set of axes
+  snapshotQuestions: [{
+    id: { type: String, required: true },
+    topic: { type: String, required: false, trim: true, maxlength: 50, default: '' },
+    label: { type: String, required: true, trim: true, maxlength: 200 },
+    color: { type: String, required: true, trim: true, maxlength: 20 },
+    order: { type: Number, required: true }
+  }],
+
+  // Snapshot axis point configuration (2 or 4 discrete points per axis)
+  xAxisPoints: { type: Number, enum: [2, 4], default: 2 },
+  yAxisPoints: { type: Number, enum: [2, 4], default: 2 },
+  // Labels for each point, left→right for x, bottom→top for y
+  xAxisLabels: [{ type: String, trim: true, maxlength: 30 }],
+  yAxisLabels: [{ type: String, trim: true, maxlength: 30 }],
 
   // Public/Private setting
   isPublic: {
@@ -272,6 +288,8 @@ const ActivitySchema = new mongoose.Schema({
         max: 1
       }
     },
+    // Snapshot: which question this rating belongs to (null for other types)
+    questionId: { type: String, required: false, default: null },
     timestamp: {
       type: Date,
       default: Date.now
@@ -313,6 +331,8 @@ const ActivitySchema = new mongoose.Schema({
       trim: true,
       maxlength: 500
     },
+    // Snapshot: which question this comment belongs to (null for other types)
+    questionId: { type: String, required: false, default: null },
     timestamp: {
       type: Date,
       default: Date.now
@@ -412,7 +432,7 @@ ActivitySchema.methods.updateParticipantConnection = function(userId, isConnecte
   return Promise.resolve(this);
 };
 
-ActivitySchema.methods.addRating = async function(userId, username, position, objectName, slotNumber = 1) {
+ActivitySchema.methods.addRating = async function(userId, username, position, objectName, slotNumber = 1, questionId = null) {
   const maxRetries = 5;
   let retries = 0;
 
@@ -428,6 +448,7 @@ ActivitySchema.methods.addRating = async function(userId, username, position, ob
         objectName: objectName || '',
         slotNumber: slotNumber,
         position: position,
+        questionId: questionId || null,
         timestamp: new Date()
       };
 
@@ -462,7 +483,9 @@ ActivitySchema.methods.addRating = async function(userId, username, position, ob
       const updatedDoc = await this.constructor.findOneAndUpdate(
         { id: this.id },
         {
-          $pull: { ratings: { userId: userId, slotNumber: slotNumber } }, // Remove existing rating for this slot
+          $pull: { ratings: questionId
+            ? { userId: userId, slotNumber: slotNumber, questionId: questionId }
+            : { userId: userId, slotNumber: slotNumber, questionId: null } }, // Remove existing rating for this slot/question
           $set: {
             'participants.$[elem].hasSubmitted': true,
             'comments.$[comment].objectName': objectName || ''
@@ -471,7 +494,9 @@ ActivitySchema.methods.addRating = async function(userId, username, position, ob
         {
           arrayFilters: [
             { 'elem.id': userId },
-            { 'comment.userId': userId, 'comment.slotNumber': slotNumber }
+            questionId
+              ? { 'comment.userId': userId, 'comment.slotNumber': slotNumber, 'comment.questionId': questionId }
+              : { 'comment.userId': userId, 'comment.slotNumber': slotNumber, 'comment.questionId': null }
           ],
           new: true,
           runValidators: true
@@ -504,11 +529,15 @@ ActivitySchema.methods.addRating = async function(userId, username, position, ob
   throw new Error('Failed to update rating after maximum retries');
 };
 
-ActivitySchema.methods.addComment = function(userId, username, text, objectName, slotNumber = 1) {
+ActivitySchema.methods.addComment = function(userId, username, text, objectName, slotNumber = 1, questionId = null) {
   const commentId = `comment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-  // Remove existing comment from same user and slot
-  this.comments = this.comments.filter(c => !(c.userId === userId && c.slotNumber === slotNumber));
+  // Remove existing comment from same user, slot, and question
+  this.comments = this.comments.filter(c => !(
+    c.userId === userId &&
+    c.slotNumber === slotNumber &&
+    (c.questionId || null) === (questionId || null)
+  ));
 
   // Add new comment
   this.comments.push({
@@ -518,6 +547,7 @@ ActivitySchema.methods.addComment = function(userId, username, text, objectName,
     objectName: objectName || '',
     slotNumber: slotNumber,
     text: text,
+    questionId: questionId || null,
     timestamp: new Date(),
     votes: [],
     voteCount: 0

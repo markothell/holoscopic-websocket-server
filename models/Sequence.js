@@ -108,7 +108,14 @@ const SequenceSchema = new mongoose.Schema({
     // Parent activity IDs for DAG relationships (empty = root node)
     parentActivityIds: [{
       type: String
-    }]
+    }],
+    // Round number for graph vertical positioning (overrides DAG rank when set)
+    round: {
+      type: Number,
+      required: false,
+      default: null,
+      min: 1
+    }
   }],
 
   // Cohort members (user IDs)
